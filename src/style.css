@@ -26,13 +26,21 @@ body {
 .tile {
     aspect-ratio: 1;
     background: #2563eb;
+    border: 0;
     border-radius: 10px;
     display: flex;
     justify-content: center;
     align-items: center;
     font-size: 30px;
     font-weight: bold;
+    color: white;
     cursor: pointer;
+}
+
+.tile:focus-visible,
+button:focus-visible {
+    outline: 3px solid #facc15;
+    outline-offset: 3px;
 }
 
 .tile.empty {

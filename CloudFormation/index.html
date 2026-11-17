@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101827">
+    <title>PuzzleOps - Sliding Puzzle</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Arial, sans-serif;
+        background: #101827;
+        color: #f8fafc;
+      }
+
+      body {
+        display: grid;
+        min-height: 100vh;
+        margin: 0;
+        place-items: center;
+      }
+
+      main {
+        width: min(90vw, 400px);
+        text-align: center;
+      }
+
+      h1 {
+        margin-bottom: 0.25rem;
+      }
+
+      .board {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin: 25px auto;
+      }
+
+      .tile {
+        aspect-ratio: 1;
+        border: 0;
+        border-radius: 10px;
+        background: #2563eb;
+        color: inherit;
+        cursor: pointer;
+        font-size: 30px;
+        font-weight: bold;
+      }
+
+      .tile:focus-visible,
+      button:focus-visible {
+        outline: 3px solid #facc15;
+        outline-offset: 3px;
+      }
+
+      .tile.empty {
+        background: #263449;
+        cursor: default;
+      }
+
+      #shuffle {
+        padding: 12px 25px;
+        border: 0;
+        border-radius: 8px;
+        background: #16a34a;
+        color: inherit;
+        cursor: pointer;
+        font-size: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>PuzzleOps</h1>
+      <p>Arrange the numbers in the correct order!</p>
+      <div id="board" class="board" aria-label="Sliding puzzle"></div>
+      <p id="moves">Moves: 0</p>
+      <p id="status" aria-live="polite">Arrange tiles from 1 to 8.</p>
+      <button id="shuffle" type="button">New Game</button>
+    </main>
+    <script>
+      let tiles = [1, 2, 3, 4, 5, 6, 7, 8, 0];
+      let moves = 0;
+
+      const board = document.getElementById("board");
+      const moveDisplay = document.getElementById("moves");
+      const status = document.getElementById("status");
+
+      function renderBoard() {
+        board.replaceChildren();
+
+        tiles.forEach((number, index) => {
+          const tile = document.createElement("button");
+          tile.type = "button";
+          tile.className = number === 0 ? "tile empty" : "tile";
+          tile.textContent = number === 0 ? "" : number;
+          tile.setAttribute(
+            "aria-label",
+            number === 0 ? "Empty space" : `Tile ${number}`
+          );
+          tile.disabled = number === 0;
+          tile.addEventListener("click", () => moveTile(index));
+          board.appendChild(tile);
+        });
+
+        moveDisplay.textContent = `Moves: ${moves}`;
+      }
+
+      function isSolved() {
+        return tiles.every((tile, position) => tile === (position + 1) % 9);
+      }
+
+      function moveTile(index) {
+        const emptyIndex = tiles.indexOf(0);
+        const row = Math.floor(index / 3);
+        const emptyRow = Math.floor(emptyIndex / 3);
+        const col = index % 3;
+        const emptyCol = emptyIndex % 3;
+        const adjacent =
+          Math.abs(row - emptyRow) + Math.abs(col - emptyCol) === 1;
+
+        if (!adjacent) return;
+
+        [tiles[index], tiles[emptyIndex]] = [tiles[emptyIndex], tiles[index]];
+        moves++;
+        renderBoard();
+
+        if (isSolved()) {
+          status.textContent = "Congratulations! Puzzle solved!";
+          return;
+        }
+
+        status.textContent = "Arrange the tiles!";
+      }
+
+      function shuffleBoard() {
+        const directions = [-3, 3, -1, 1];
+
+        do {
+          tiles = [1, 2, 3, 4, 5, 6, 7, 8, 0];
+          moves = 0;
+
+          for (let count = 0; count < 1000; count++) {
+            const empty = tiles.indexOf(0);
+            const validMoves = directions.filter((direction) => {
+              const next = empty + direction;
+              if (next < 0 || next > 8) return false;
+              if (direction === -1 && empty % 3 === 0) return false;
+              if (direction === 1 && empty % 3 === 2) return false;
+              return true;
+            });
+            const selected =
+              validMoves[Math.floor(Math.random() * validMoves.length)];
+
+            [tiles[empty], tiles[empty + selected]] = [
+              tiles[empty + selected],
+              tiles[empty],
+            ];
+          }
+        } while (isSolved());
+
+        status.textContent = "Arrange the tiles!";
+        renderBoard();
+      }
+
+      document
+        .getElementById("shuffle")
+        .addEventListener("click", shuffleBoard);
+
+      renderBoard();
+      shuffleBoard();
+    </script>
+  </body>
+</html>

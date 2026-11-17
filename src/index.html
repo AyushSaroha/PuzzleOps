@@ -13,12 +13,12 @@
         <h1>PuzzleOps</h1>
         <p>Arrange the numbers in the correct order!</p>
 
-        <div id="board" class="board"></div>
+        <div id="board" class="board" aria-label="Sliding puzzle"></div>
 
         <p id="moves">Moves: 0</p>
-        <p id="status">Arrange tiles from 1 to 8.</p>
+        <p id="status" aria-live="polite">Arrange tiles from 1 to 8.</p>
 
-        <button id="shuffle">New Game</button>
+        <button id="shuffle" type="button">New Game</button>
     </main>
 
     <script src="script.js"></script>
