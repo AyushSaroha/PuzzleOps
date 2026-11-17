@@ -114,11 +114,12 @@ pipeline {
                 )]) {
                     script {
                         env.DEPLOY_HOST = sh(
-                            script: '''
+                            script: '''#!/bin/bash
+                                set -eu
                                 aws cloudformation describe-stacks \
                                     --region "$AWS_REGION" \
                                     --stack-name "$STACK_NAME" \
-                                    --query "Stacks[0].Outputs[?OutputKey==\`WebsiteIP\`].OutputValue" \
+                                    --query "Stacks[0].Outputs[?OutputKey=='WebsiteIP'].OutputValue | [0]" \
                                     --output text \
                                     --no-cli-pager
                             ''',
