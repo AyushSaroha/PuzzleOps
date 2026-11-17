@@ -12,12 +12,88 @@ GitHub push → Jenkins → EC2 (Nginx serves src/) → public website
 EC2 → CloudWatch Logs (/puzzleops/nginx) and PuzzleOps metrics
 ```
 
+The independent containerized deployment in `CloudFormation/` packages the
+puzzle as a Docker image and runs it on ECS Fargate behind an Application Load
+Balancer. It does not replace or change the Jenkins deployment above.
+
 ## Repository files
 
 - `Jenkinsfile` — validates, optionally provisions AWS, deploys to Nginx, and verifies the site.
 - `infra/template.yaml` — CloudFormation for the VPC, EC2, Elastic IP, Nginx, CloudWatch Agent, log group, SNS topic, and alarms.
+- `CloudFormation/` — separate Docker-based Flask-free Python HTTP server, puzzle page, and ECS/Fargate CloudFormation stack.
 - `scripts/deploy.sh` — creates or updates the CloudFormation stack and returns the website IP.
 - `src/` — files copied to `/usr/share/nginx/html` on EC2.
+
+## Deploy the containerized app
+
+This deployment creates an ECR repository, an ECS Fargate service, and a public
+HTTP load balancer. It uses two stack updates because the image must be pushed
+to ECR before ECS can start a task. The resources can incur AWS charges; delete
+the `puzzleops-container` stack when finished.
+
+To run the containerized app locally with Docker Compose:
+
+```bash
+docker compose up -d --build
+```
+
+Open `http://localhost:5000`. Stop the app with `docker compose down`.
+
+1. Create the infrastructure with the service initially at zero tasks:
+
+   ```bash
+   aws cloudformation deploy \
+     --template-file CloudFormation/template.yaml \
+     --stack-name puzzleops-container \
+     --region ap-south-1 \
+     --capabilities CAPABILITY_IAM \
+     --parameter-overrides DesiredCount=0
+   ```
+
+2. Read the repository URI and your AWS account ID, then build and push the
+   image. Replace `IMAGE_TAG` with a unique tag for each application release:
+
+   ```bash
+   AWS_REGION=ap-south-1
+   IMAGE_TAG=release-1
+   ECR_URI=$(aws cloudformation describe-stacks \
+     --stack-name puzzleops-container \
+     --region "$AWS_REGION" \
+     --query "Stacks[0].Outputs[?OutputKey=='EcrRepositoryUri'].OutputValue | [0]" \
+     --output text)
+   ECR_REGISTRY=${ECR_URI%%/*}
+
+   aws ecr get-login-password --region "$AWS_REGION" |
+     docker login --username AWS --password-stdin "$ECR_REGISTRY"
+   docker build -t "puzzleops:$IMAGE_TAG" CloudFormation/
+   docker tag "puzzleops:$IMAGE_TAG" "$ECR_URI:$IMAGE_TAG"
+   docker push "$ECR_URI:$IMAGE_TAG"
+   ```
+
+3. Set the image tag and start one Fargate task:
+
+   ```bash
+   aws cloudformation deploy \
+     --template-file CloudFormation/template.yaml \
+     --stack-name puzzleops-container \
+     --region "$AWS_REGION" \
+     --capabilities CAPABILITY_IAM \
+     --parameter-overrides DesiredCount=1 ImageTag="$IMAGE_TAG"
+   ```
+
+4. Get the public URL from the stack outputs:
+
+   ```bash
+   aws cloudformation describe-stacks \
+     --stack-name puzzleops-container \
+     --region "$AWS_REGION" \
+     --query "Stacks[0].Outputs[?OutputKey=='WebsiteUrl'].OutputValue | [0]" \
+     --output text
+   ```
+
+For later releases, push a new unique image tag and update the stack with that
+tag. This deployment exposes HTTP only; configure HTTPS and a domain before
+using it for production traffic.
 
 ## One-time AWS preparation
 
