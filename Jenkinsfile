@@ -138,9 +138,10 @@ for o in data['Stacks'][0].get('Outputs', []):
 " > deploy_host.txt
                     '''
                     script {
-                        env.DEPLOY_HOST = readFile('deploy_host.txt').trim()
-                        echo "Resolved DEPLOY_HOST: '${env.DEPLOY_HOST}'"
-                        if (!env.DEPLOY_HOST || env.DEPLOY_HOST == 'None' || env.DEPLOY_HOST == 'null') {
+                        def resolvedHost = readFile('deploy_host.txt').trim()
+                        env.DEPLOY_HOST = resolvedHost
+                        echo "Resolved DEPLOY_HOST: '${resolvedHost}'"
+                        if (!resolvedHost || resolvedHost == 'None' || resolvedHost == 'null') {
                             error('CloudFormation did not return a WebsiteIP. Run once with PROVISION_INFRASTRUCTURE enabled.')
                         }
                     }
@@ -153,6 +154,7 @@ for o in data['Stacks'][0].get('Outputs', []):
                 sshagent(credentials: [env.EC2_KEY_ID]) {
                     sh '''
                         set -eu
+                        DEPLOY_HOST="${DEPLOY_HOST:-$(cat deploy_host.txt 2>/dev/null || true)}"
                         for attempt in $(seq 1 48); do
                             if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
                                 "$EC2_USER@$DEPLOY_HOST" 'sudo systemctl is-active --quiet nginx'; then
@@ -173,6 +175,7 @@ for o in data['Stacks'][0].get('Outputs', []):
                 sshagent(credentials: [env.EC2_KEY_ID]) {
                     sh '''
                         set -eu
+                        DEPLOY_HOST="${DEPLOY_HOST:-$(cat deploy_host.txt 2>/dev/null || true)}"
                         ssh -o StrictHostKeyChecking=accept-new \
                             "$EC2_USER@$DEPLOY_HOST" 'rm -rf /tmp/puzzleops && mkdir -p /tmp/puzzleops'
                         scp -o StrictHostKeyChecking=accept-new -r src/. \
@@ -193,6 +196,7 @@ for o in data['Stacks'][0].get('Outputs', []):
             steps {
                 sh '''
                     set -eu
+                    DEPLOY_HOST="${DEPLOY_HOST:-$(cat deploy_host.txt 2>/dev/null || true)}"
                     curl --fail --silent --show-error --retry 12 --retry-delay 5 \
                         --output /dev/null "http://$DEPLOY_HOST/"
                     echo "PuzzleOps deployed successfully: http://$DEPLOY_HOST/"
