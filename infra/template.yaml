@@ -98,6 +98,16 @@ Resources:
           FromPort: 22
           ToPort: 22
           CidrIp: !Ref SshAllowedCidr
+        - Description: Public Grafana dashboard
+          IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - Description: Public Prometheus server
+          IpProtocol: tcp
+          FromPort: 9090
+          ToPort: 9090
+          CidrIp: 0.0.0.0/0
 
   CloudWatchRole:
     Type: AWS::IAM::Role
@@ -306,6 +316,14 @@ Outputs:
   WebsiteIP:
     Description: Elastic IP used by Jenkins for deployment.
     Value: !Ref WebElasticIp
+
+  GrafanaUrl:
+    Description: Public URL for Grafana Dashboard.
+    Value: !Sub "http://${WebElasticIp}:3000"
+
+  PrometheusUrl:
+    Description: Public URL for Prometheus Server.
+    Value: !Sub "http://${WebElasticIp}:9090"
 
   InstanceId:
     Description: EC2 instance ID.
