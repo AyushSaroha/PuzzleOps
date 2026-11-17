@@ -6,7 +6,7 @@ INDEX_FILE = Path(__file__).with_name("index.html")
 
 
 class PuzzleOpsHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
+    def _send_response(self, send_body=True):
         if self.path == "/health":
             content = b'{"status":"ok"}'
             content_type = "application/json"
@@ -24,7 +24,14 @@ class PuzzleOpsHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(content)))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(content)
+        if send_body:
+            self.wfile.write(content)
+
+    def do_GET(self):
+        self._send_response(send_body=True)
+
+    def do_HEAD(self):
+        self._send_response(send_body=False)
 
 
 if __name__ == "__main__":
