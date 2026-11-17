@@ -119,20 +119,30 @@ pipeline {
                     usernameVariable: 'AWS_ACCESS_KEY_ID',
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
+                    sh '''
+                        set -eu
+                        echo "Resolving deployment host for region=${AWS_REGION:-ap-south-1}, stack=${STACK_NAME:-puzzleops-stack}..."
+                        aws cloudformation describe-stacks \
+                            --region "${AWS_REGION:-ap-south-1}" \
+                            --stack-name "${STACK_NAME:-puzzleops-stack}" \
+                            --output json > /tmp/cfn_stack.json
+
+                        python3 -c "
+import json
+with open('/tmp/cfn_stack.json', 'r') as f:
+    data = json.load(f)
+for o in data['Stacks'][0].get('Outputs', []):
+    if o['OutputKey'] == 'WebsiteIP':
+        print(o['OutputValue'])
+        break
+" > deploy_host.txt
+                    '''
                     script {
-                        echo "Resolving deployment host for region=${env.AWS_REGION}, stack=${env.STACK_NAME}..."
-                        env.DEPLOY_HOST = sh(
-                            script: '''
-                                python3 -c "import json, subprocess, os; data = json.loads(subprocess.check_output(['aws', 'cloudformation', 'describe-stacks', '--region', os.environ['AWS_REGION'], '--stack-name', os.environ['STACK_NAME'], '--output', 'json'])); print(next(o['OutputValue'] for o in data['Stacks'][0]['Outputs'] if o['OutputKey'] == 'WebsiteIP'))"
-                            ''',
-                            returnStdout: true
-                        ).trim()
+                        env.DEPLOY_HOST = readFile('deploy_host.txt').trim()
                         echo "Resolved DEPLOY_HOST: '${env.DEPLOY_HOST}'"
-                    }
-                }
-                script {
-                    if (!env.DEPLOY_HOST || env.DEPLOY_HOST == 'None' || env.DEPLOY_HOST == 'null') {
-                        error('CloudFormation did not return a WebsiteIP. Run once with PROVISION_INFRASTRUCTURE enabled.')
+                        if (!env.DEPLOY_HOST || env.DEPLOY_HOST == 'None' || env.DEPLOY_HOST == 'null') {
+                            error('CloudFormation did not return a WebsiteIP. Run once with PROVISION_INFRASTRUCTURE enabled.')
+                        }
                     }
                 }
             }
