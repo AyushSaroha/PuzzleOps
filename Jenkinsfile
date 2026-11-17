@@ -120,9 +120,10 @@ pipeline {
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
                     script {
+                        echo "Resolving deployment host for region=${env.AWS_REGION}, stack=${env.STACK_NAME}..."
                         env.DEPLOY_HOST = sh(
                             script: '''#!/bin/bash
-                                set -eu
+                                set -x
                                 aws cloudformation describe-stacks \
                                     --region "$AWS_REGION" \
                                     --stack-name "$STACK_NAME" \
@@ -132,6 +133,7 @@ pipeline {
                             ''',
                             returnStdout: true
                         ).trim()
+                        echo "Resolved DEPLOY_HOST: '${env.DEPLOY_HOST}'"
                     }
                 }
                 script {
