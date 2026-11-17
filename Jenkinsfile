@@ -118,7 +118,7 @@ pipeline {
                                 aws cloudformation describe-stacks \
                                     --region "$AWS_REGION" \
                                     --stack-name "$STACK_NAME" \
-                                    --query "Stacks[0].Outputs[?OutputKey=='WebsiteIP'].OutputValue | [0]" \
+                                    --query "Stacks[0].Outputs[?OutputKey=='WebsiteIP'].OutputValue" \
                                     --output text \
                                     --no-cli-pager
                             ''',
