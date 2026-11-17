@@ -122,14 +122,8 @@ pipeline {
                     script {
                         echo "Resolving deployment host for region=${env.AWS_REGION}, stack=${env.STACK_NAME}..."
                         env.DEPLOY_HOST = sh(
-                            script: '''#!/bin/bash
-                                set -x
-                                aws cloudformation describe-stacks \
-                                    --region "$AWS_REGION" \
-                                    --stack-name "$STACK_NAME" \
-                                    --query "Stacks[0].Outputs[?OutputKey=='WebsiteIP'].OutputValue | [0]" \
-                                    --output text \
-                                    --no-cli-pager
+                            script: '''
+                                python3 -c "import json, subprocess, os; data = json.loads(subprocess.check_output(['aws', 'cloudformation', 'describe-stacks', '--region', os.environ['AWS_REGION'], '--stack-name', os.environ['STACK_NAME'], '--output', 'json'])); print(next(o['OutputValue'] for o in data['Stacks'][0]['Outputs'] if o['OutputKey'] == 'WebsiteIP'))"
                             ''',
                             returnStdout: true
                         ).trim()
@@ -137,7 +131,7 @@ pipeline {
                     }
                 }
                 script {
-                    if (!env.DEPLOY_HOST || env.DEPLOY_HOST == 'None') {
+                    if (!env.DEPLOY_HOST || env.DEPLOY_HOST == 'None' || env.DEPLOY_HOST == 'null') {
                         error('CloudFormation did not return a WebsiteIP. Run once with PROVISION_INFRASTRUCTURE enabled.')
                     }
                 }
