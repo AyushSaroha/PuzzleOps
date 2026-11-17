@@ -1,0 +1,316 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: PuzzleOps EC2, Nginx, CloudWatch logs, metrics, and alarms.
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Existing EC2 key pair used by Jenkins to deploy to the web server.
+
+  SshAllowedCidr:
+    Type: String
+    Description: Public CIDR of the Jenkins server (for example, 203.0.113.10/32).
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$'
+    ConstraintDescription: Enter an IPv4 CIDR such as 203.0.113.10/32.
+
+  NotificationEmail:
+    Type: String
+    Default: ""
+    Description: Optional email address for CloudWatch alarms. Confirm the AWS SNS email.
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t3.micro
+      - t3.small
+    Description: EC2 instance size for the web server.
+
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Conditions:
+  HasNotificationEmail: !Not [!Equals [!Ref NotificationEmail, ""]]
+
+Resources:
+  PuzzleOpsVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: PuzzleOps-VPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  AttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref PuzzleOpsVpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PuzzleOpsVpc
+      CidrBlock: 10.20.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: PuzzleOps-PublicSubnet
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PuzzleOpsVpc
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachInternetGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Permit public web traffic and SSH only from Jenkins.
+      VpcId: !Ref PuzzleOpsVpc
+      SecurityGroupIngress:
+        - Description: Public PuzzleOps website
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: Jenkins deployment connection
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SshAllowedCidr
+
+  CloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+
+  WebInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref CloudWatchRole
+
+  NginxLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /puzzleops/nginx
+      RetentionInDays: 30
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-alerts"
+
+  AlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasNotificationEmail
+    Properties:
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
+      TopicArn: !Ref AlertTopic
+
+  WebServer:
+    Type: AWS::EC2::Instance
+    DependsOn: PublicSubnetRouteTableAssociation
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref WebInstanceProfile
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref WebSecurityGroup
+          SubnetId: !Ref PublicSubnet
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 10
+            VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: PuzzleOps-Web-Server
+        - Key: Application
+          Value: PuzzleOps
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+
+            dnf update -y
+            dnf install -y nginx amazon-cloudwatch-agent
+
+            systemctl enable nginx
+            systemctl start nginx
+
+            cat > /usr/share/nginx/html/index.html <<'EOF'
+            <!doctype html>
+            <html lang="en">
+              <head><meta charset="utf-8"><title>PuzzleOps</title></head>
+              <body><h1>PuzzleOps is ready for Jenkins deployment.</h1></body>
+            </html>
+            EOF
+
+            cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWAGENT'
+            {
+              "agent": { "metrics_collection_interval": 60 },
+              "metrics": {
+                "namespace": "PuzzleOps",
+                "append_dimensions": { "InstanceId": "${!aws:InstanceId}" },
+                "aggregation_dimensions": [["InstanceId"]],
+                "metrics_collected": {
+                  "mem": { "measurement": ["mem_used_percent"] },
+                  "disk": {
+                    "measurement": ["used_percent"],
+                    "resources": ["/"],
+                    "ignore_file_system_types": ["sysfs", "devtmpfs", "tmpfs", "overlay", "squashfs"]
+                  }
+                }
+              },
+              "logs": {
+                "logs_collected": {
+                  "files": {
+                    "collect_list": [
+                      {
+                        "file_path": "/var/log/nginx/access.log",
+                        "log_group_name": "${NginxLogGroup}",
+                        "log_stream_name": "{instance_id}/access"
+                      },
+                      {
+                        "file_path": "/var/log/nginx/error.log",
+                        "log_group_name": "${NginxLogGroup}",
+                        "log_stream_name": "{instance_id}/error"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+            CWAGENT
+
+            /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+              -a fetch-config \
+              -m ec2 \
+              -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json \
+              -s
+          - NginxLogGroup: !Ref NginxLogGroup
+
+  WebElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: PuzzleOps-Web-Server-EIP
+
+  WebElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt WebElasticIp.AllocationId
+      InstanceId: !Ref WebServer
+
+  HighCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-high-cpu"
+      AlarmDescription: CPU utilization is above 80 percent for 10 minutes.
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref WebServer
+      AlarmActions:
+        - !Ref AlertTopic
+
+  HighMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-high-memory"
+      AlarmDescription: Memory utilization is above 85 percent for 10 minutes.
+      Namespace: PuzzleOps
+      MetricName: mem_used_percent
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref WebServer
+      AlarmActions:
+        - !Ref AlertTopic
+
+  HighDiskAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-high-disk"
+      AlarmDescription: Root disk utilization is above 85 percent for 10 minutes.
+      Namespace: PuzzleOps
+      MetricName: disk_used_percent
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref WebServer
+      AlarmActions:
+        - !Ref AlertTopic
+
+Outputs:
+  WebsiteUrl:
+    Description: Public URL for PuzzleOps.
+    Value: !Sub "http://${WebElasticIp}"
+
+  WebsiteIP:
+    Description: Elastic IP used by Jenkins for deployment.
+    Value: !Ref WebElasticIp
+
+  InstanceId:
+    Description: EC2 instance ID.
+    Value: !Ref WebServer
+
+  NginxLogGroupName:
+    Description: CloudWatch log group for Nginx access and error logs.
+    Value: !Ref NginxLogGroup
