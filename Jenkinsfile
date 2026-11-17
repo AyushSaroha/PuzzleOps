@@ -58,6 +58,13 @@ pipeline {
         DEPLOY_HOST = ''
         EC2_USER = 'ec2-user'
         REMOTE_DIR = '/usr/share/nginx/html'
+        AWS_REGION = "${params.AWS_REGION ?: 'ap-south-1'}"
+        STACK_NAME = "${params.STACK_NAME ?: 'puzzleops-stack'}"
+        EC2_KEY_NAME = "${params.EC2_KEY_NAME ?: 'puzzleops-key'}"
+        JENKINS_SSH_CIDR = "${params.JENKINS_SSH_CIDR ?: ''}"
+        NOTIFICATION_EMAIL = "${params.NOTIFICATION_EMAIL ?: ''}"
+        AWS_CRED_ID = "${params.AWS_CREDENTIALS_ID ?: 'aws-puzzleops'}"
+        EC2_KEY_ID = "${params.EC2_SSH_CREDENTIAL_ID ?: 'puzzleops-ec2-key'}"
     }
 
     stages {
@@ -88,7 +95,7 @@ pipeline {
                     }
                 }
                 withCredentials([usernamePassword(
-                    credentialsId: params.AWS_CREDENTIALS_ID,
+                    credentialsId: env.AWS_CRED_ID,
                     usernameVariable: 'AWS_ACCESS_KEY_ID',
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
@@ -108,7 +115,7 @@ pipeline {
         stage('Resolve deployment host') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: params.AWS_CREDENTIALS_ID,
+                    credentialsId: env.AWS_CRED_ID,
                     usernameVariable: 'AWS_ACCESS_KEY_ID',
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
@@ -137,7 +144,7 @@ pipeline {
 
         stage('Wait for Nginx') {
             steps {
-                sshagent(credentials: [params.EC2_SSH_CREDENTIAL_ID]) {
+                sshagent(credentials: [env.EC2_KEY_ID]) {
                     sh '''
                         set -eu
                         for attempt in $(seq 1 48); do
@@ -157,7 +164,7 @@ pipeline {
 
         stage('Deploy website') {
             steps {
-                sshagent(credentials: [params.EC2_SSH_CREDENTIAL_ID]) {
+                sshagent(credentials: [env.EC2_KEY_ID]) {
                     sh '''
                         set -eu
                         ssh -o StrictHostKeyChecking=accept-new \
